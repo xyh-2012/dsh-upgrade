@@ -1,6 +1,6 @@
 {
   "name": "dsh-upgrade",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Upgrade this DSH installation to the newest published build and prove the new version is live.",
   "type": "module",
   "main": "index.js",

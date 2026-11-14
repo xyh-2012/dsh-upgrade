@@ -24,6 +24,14 @@ test('the restart script follows the port the shell actually advertises', () => 
   assert.ok(!script.includes("http://127.0.0.1:3179/"), 'does not keep insisting on the requested port');
 });
 
+test('the restart script only trusts log lines written after the relaunch', () => {
+  const script = buildRestartScript({});
+  assert.ok(script.includes('$startOffset'), 'remembers where the log ended');
+  assert.ok(script.includes('Get-Item -LiteralPath $shellLog).Length'), 'measures the log size');
+  assert.ok(!script.includes('-Tail 40'), 'does not scan a fixed tail window');
+  assert.ok(script.indexOf('startOffset = (Get-Item') < script.indexOf('shell relaunched'), 'samples the offset before relaunching');
+});
+
 test('the restart script refuses to run without the shell executable', () => {
   const script = buildRestartScript({ shellExe: 'C:\\missing\\DshDesktop.exe' });
   assert.match(script, /Test-Path -LiteralPath 'C:\\missing\\DshDesktop\.exe'/u);

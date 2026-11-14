@@ -118,7 +118,7 @@ node scripts/selfcheck.mjs --apply            # 真升级
 ## 测试
 
 ```powershell
-npm test     # node --test test/  —— 39 个用例，覆盖版本比较、参数校验、registry 选版、重启脚本
+npm test     # node --test test/  —— 40 个用例，覆盖版本比较、参数校验、registry 选版、重启脚本
 ```
 
 ## License
