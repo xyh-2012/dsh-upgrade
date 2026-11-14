@@ -5,3 +5,4 @@
         channel: newest
         autoRestart: false
         restartDelaySeconds: 6
+        restartMode: auto

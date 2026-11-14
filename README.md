@@ -29,16 +29,17 @@ plugin_manager  action=install_bundle  target=C:\dsh\plugins\dsh-upgrade
 ```
 
 装完的验收信号是 `application: applied`，可用 `cordis_inspect_query` 查 `Tool` 列表看到
-`dsh_upgrade_status` / `dsh_upgrade_apply` / `dsh_upgrade_verify` / `dsh_upgrade_restart`。
+`dsh_upgrade_status` / `dsh_upgrade_apply` / `dsh_upgrade_verify` / `dsh_upgrade_restart` /
+`dsh_upgrade_status_all`。
 
-## 四个工具
+## 五个工具
 
 | 工具 | 作用 | 是否改盘 |
 | --- | --- | --- |
 | `dsh_upgrade_status` | 报告已装版本、registry 全部 dist-tag、升级目标、是否有新版 | 否 |
 | `dsh_upgrade_apply` | 下载 → 校验哈希 → npm install → 重钉依赖 → 验证 | 是（`dryRun` 时否） |
 | `dsh_upgrade_verify` | 比对 manifest / 新进程 `--version` / tarball 哈希 | 否 |
-| `dsh_upgrade_restart` | 重启桌面外壳，让新版本加载 | 是 |
+| `dsh_upgrade_restart` | 重启外壳或 web 服务（`mode` 可选 `auto`/`shell`/`cli`），让新版本加载 | 是 |
 | `dsh_upgrade_status_all` | 一次报多个安装根目录的版本，不扫盘 | 否 |
 
 还有一个人类入口：`/upgrade` 斜杠命令，等价于 apply + restart。
@@ -64,19 +65,41 @@ Job Object 里，且 Job 没有设 breakaway 标志 —— 外壳一死，web �
 
 `dsh_upgrade_restart` 因此用 `Invoke-CimMethod Win32_Process Create` 把重启脚本交给
 `WmiPrvSE.exe` 持有：该进程不在 Job 内，能活到外壳被杀之后，再去重启整个外壳。
+WMI 不可用时退回 `schtasks` 一次性任务。
 
-顺序也是固定下来的：先停 web 服务 → 再停外壳 → 拉起外壳 → **读外壳自己报告的地址**
-（`%LOCALAPPDATA%\DshDesktop\shell.log` 的 `ready url=` 行）→ 确认该 URL 应答。
+**自重启**：不需要手动关窗口再打开。插件会
+
+1. 先把「打算重启」写进 `.dsh-upgrade/pending-restart.json`；
+2. 脚本把旧 web 服务与外壳停掉，再把新版拉起来；
+3. 新版进程启动时，`apply()` 调 `confirmSelfRestart()` 比对
+   `processStartedAt() > requestedAt`，确认「就是这次重启把我拉起来的」，
+   写 `.dsh-upgrade/self-restart.json` 并清掉 pending 标记。
+
+重启方式由 `mode` 决定：
+
+| mode | 行为 |
+| --- | --- |
+| `auto`（默认） | 有 `DshDesktop.exe` 就跑外壳模式，否则跑 cli 模式 |
+| `shell` | 停掉外壳，重新拉起外壳，由外壳再起 web 服务 |
+| `cli` | 不碰外壳，只把 `node <root>/node_modules/@deepseek-ai/dsh/lib/bin.js web` 脱离式拉起 |
+
+cli 模式是为「从终端跑 `dsh web`」的场景准备的：那里没有外壳可重启，直接重启
+web 服务本身。两种模式都用同一个 `ready url=` 判据核对结果。
+
+顺序也是固定下来的：先停 web 服务 → 再停外壳（仅 shell 模式）→ 拉起 → **读外壳自己
+报告的地址**（`%LOCALAPPDATA%\DshDesktop\shell.log` 的 `ready url=` 行）→ 确认该 URL 应答。
 外壳用 `FindFreePort(3179)` 选端口，所以不能硬等 3179。
 
 结束后把证据写进 `.dsh-upgrade/last-restart.json`：
 
 ```json
-{"ok":true,"url":"http://127.0.0.1:3179/","answered":true,"requestedPort":3179,
- "stoppedWeb":[14108],"stoppedShell":[13584],"startedAt":"...","at":"..."}
+{"ok":true,"reason":"completed","mode":"shell","url":"http://127.0.0.1:3179/","answered":true,
+ "requestedPort":3179,"stoppedWeb":[14108],"stoppedShell":[13584],"startedWeb":0,"startedShell":1,
+ "startedAt":"...","at":"..."}
 ```
 
-下一次会话可以用 `readRestartReport(root)` 或直接读这个文件，核实上次重启到底成没成。
+下一次会话可以用 `readRestartReport(root)` / `readSelfRestart(root)`，或直接读这两个文件，
+核实上次重启到底成没成。
 
 ## 配置
 
@@ -88,6 +111,7 @@ registry: ''               # 空 = 用 .npmrc 里的配置
 root: ''                   # 空 = 自动探测（当前进程的 bin.js 往上找）
 autoRestart: false         # apply 成功后是否自动重启
 restartDelaySeconds: 6     # 重启前等待，留出把结果返回给调用方的时间
+restartMode: auto          # auto | shell | cli
 ```
 
 ## 命令行自检
@@ -114,11 +138,19 @@ node scripts/selfcheck.mjs --apply            # 真升级
 - 不要从 profile 的 `node_modules` 解析 `@deepseek-ai/dsh-tools`：那会遮蔽 CLI 内建的
   base layer，agent loop 的私有 scheduler 符号丢失，每次工具调用都报
   `Cannot read properties of undefined (reading 'prepare')`。所以 `lib/sdk.js` 是自包含的。
+- **`Start-Process` 在无控制台的脱会话 PowerShell 里会永久阻塞**：从 WMI 起的脚本里
+  `Start-Process -FilePath <控制台程序>` 直接不返回（实测 `cmd /c exit` 只要 83ms，
+  而 `Start-Process FakeShell.exe` 挂死）。因此重启脚本用
+  `Invoke-CimMethod Win32_Process Create` 起进程（97ms 返回），`cmd /c start` 仅作兜底。
+- **沙箱子进程写不了 `%LOCALAPPDATA%`**：演练时伪造的外壳往里写日志直接
+  `UnauthorizedAccessException`。演练产物一律放工作区内；真外壳写自己的目录没问题。
+- **不要用 `Start-Process -ArgumentList` 传含空格的路径**：引号会丢，报
+  `Win32Exception: 系统找不到指定的文件`。
 
 ## 测试
 
 ```powershell
-npm test     # node --test test/  —— 40 个用例，覆盖版本比较、参数校验、registry 选版、重启脚本
+npm test     # node --test test/  —— 54 个用例，覆盖版本比较、参数校验、registry 选版、重启脚本
 ```
 
 ## License

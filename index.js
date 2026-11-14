@@ -13,7 +13,12 @@ import { defineTool } from './lib/sdk.js';
 import { detectInstallRoot, installedVersion } from './lib/install.js';
 import { PACKAGE_NAME, fetchPackument, pickTargetVersion, resolveRegistry } from './lib/registry.js';
 import { applyUpgrade, probe, readLastRun, verifyInstall } from './lib/upgrade.js';
-import { readRestartReport, scheduleRestart } from './lib/restart.js';
+import {
+  confirmSelfRestart,
+  readRestartReport,
+  readSelfRestart,
+  scheduleRestart,
+} from './lib/restart.js';
 
 /** Package name, also used as the bundle id. */
 export const name = 'dsh-upgrade';
@@ -27,6 +32,7 @@ const DEFAULTS = {
   registry: '',
   root: '',
   autoRestart: false,
+  restartMode: 'auto',
   restartDelaySeconds: 6,
 };
 
@@ -71,6 +77,19 @@ export function apply(ctx, config) {
     root,
   );
 
+  // A restart this plugin asked for is proven by the fact that we are running
+  // now: record it before anything else can fail, so the next status call can
+  // show that the new build really is the one answering.
+  try {
+    const loadRoot = resolveRoot();
+    const confirmed = confirmSelfRestart(loadRoot, { version: installedVersion(loadRoot) });
+    if (confirmed !== null) {
+      ctx.logger?.info?.(`dsh-upgrade: restart confirmed (${confirmed.requestedMode}, waited ${String(confirmed.waitedMs)}ms)`);
+    }
+  } catch {
+    // A missing or unreadable state directory must never stop the plugin loading.
+  }
+
   ctx.tools.register(defineTool({
     name: 'dsh_upgrade_status',
     description:
@@ -99,6 +118,8 @@ export function apply(ctx, config) {
           newestVersion: { type: 'string', description: 'newest published version' },
           pinnedSpec: { type: 'string', description: 'dependency spec pinned in the root manifest' },
           lastRun: { type: 'json', description: 'previous upgrade record, when present' },
+          lastRestart: { type: 'json', description: 'outcome of the last completed restart' },
+          selfRestart: { type: 'json', description: 'proof that a requested restart brought this process up' },
         },
       },
       render: (_args, value) => text(
@@ -108,6 +129,12 @@ export function apply(ctx, config) {
         `upgrade target: ${value.targetVersion}`,
         `update available: ${value.updateAvailable ? 'yes' : 'no'}`,
         `pinned dependency: ${value.pinnedSpec || '(none)'}`,
+        ...(value.lastRestart !== undefined && value.lastRestart !== null
+          ? [`last restart: ${value.lastRestart.ok === true ? 'ok' : String(value.lastRestart.reason ?? 'failed')} (${value.lastRestart.mode ?? '?'}) ${value.lastRestart.url ?? ''}`]
+          : []),
+        ...(value.selfRestart !== undefined && value.selfRestart !== null
+          ? [`self restart: confirmed, asked ${value.selfRestart.requestedAt}, up since ${value.selfRestart.processStartedAt}, running ${value.selfRestart.version || '?'}`]
+          : []),
       ),
     },
     async execute(args, exec) {
@@ -123,6 +150,8 @@ export function apply(ctx, config) {
         ...update,
         distTags: update.distTags,
         lastRun: readLastRun(root) ?? null,
+        lastRestart: readRestartReport(root),
+        selfRestart: readSelfRestart(root),
       };
     },
   }));
@@ -240,7 +269,12 @@ export function apply(ctx, config) {
     parameters: {
       root: { type: 'string', description: 'Install root. Defaults to this process install.' },
       port: { type: 'number', description: 'Port the web server should answer on (default 3179).' },
-      delaySeconds: { type: 'number', description: 'How long to wait before stopping the shell (default 6).' },
+      delaySeconds: { type: 'number', description: 'How long to wait before stopping the host (default 6).' },
+      mode: {
+        type: 'string',
+        description: "How to come back: 'auto' (default: relaunch the desktop shell when one is running, else start the web server detached), 'shell', or 'cli'.",
+        enum: ['auto', 'shell', 'cli'],
+      },
     },
     output: {
       schema: {
@@ -250,6 +284,7 @@ export function apply(ctx, config) {
           ok: { type: 'boolean', required: true, description: 'the detached restart was started' },
           scriptPath: { type: 'string', description: 'generated restart script' },
           pid: { type: 'number', description: 'detached process id' },
+          method: { type: 'string', description: 'how the script was launched (wmi or schtasks)' },
           detail: { type: 'string', description: 'human-readable outcome' },
           previousRestart: { type: 'json', description: 'evidence from the last completed restart' },
         },
@@ -257,10 +292,12 @@ export function apply(ctx, config) {
       render: (_args, value) => text(
         `restart: ${value.ok === true ? 'scheduled' : 'failed'}`,
         value.detail ?? '',
+        value.method !== undefined ? `launched through: ${value.method}` : '',
         value.scriptPath !== undefined ? `script: ${value.scriptPath}` : '',
         ...(value.previousRestart !== undefined && value.previousRestart !== null
           ? [
             'previous restart:',
+            `  mode: ${value.previousRestart.mode ?? '(unknown)'}`,
             `  answered: ${String(value.previousRestart.answered)}`,
             `  url: ${value.previousRestart.url ?? '(none)'}`,
             `  at: ${value.previousRestart.at ?? '(unknown)'}`,
@@ -274,6 +311,7 @@ export function apply(ctx, config) {
       const launched = await scheduleRestart(root, {
         port: args.port ?? 3179,
         delaySeconds: args.delaySeconds ?? settings.restartDelaySeconds,
+        mode: args.mode ?? settings.restartMode,
         signal: exec?.signal,
       });
       return { ...launched, previousRestart };
