@@ -1,0 +1,5 @@
+node_modules/
+scratch/
+verify/*.out
+verify/*.err
+*.log

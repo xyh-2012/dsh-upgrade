@@ -1,0 +1,60 @@
+{
+  "name": "dsh-upgrade",
+  "version": "0.1.0",
+  "description": "Upgrade this DSH installation to the newest published build and prove the new version is live.",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./package.json": "./package.json",
+    "./icon": "./icon.svg",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "files": [
+    "index.js",
+    "lib/",
+    "locale/*.json",
+    "scripts/",
+    "cordis.patch.yml",
+    "icon.svg",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "upgrade",
+    "self-update",
+    "npm",
+    "bundle"
+  ],
+  "license": "MIT",
+  "author": "xyh-2012",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xyh-2012/dsh-upgrade.git"
+  },
+  "homepage": "https://github.com/xyh-2012/dsh-upgrade#readme",
+  "bugs": {
+    "url": "https://github.com/xyh-2012/dsh-upgrade/issues"
+  },
+  "engines": {
+    "node": ">=20.18"
+  },
+  "scripts": {
+    "test": "node --test test/"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "compatibility": {
+      "dsh": ">=0.2.1-rc.2 <0.3.0",
+      "node": ">=20.18",
+      "profiles": [
+        "web"
+      ]
+    }
+  }
+}

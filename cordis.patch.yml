@@ -1,0 +1,7 @@
+- insert:
+    - id: upgrade
+      name: 'dsh-upgrade'
+      config:
+        channel: newest
+        autoRestart: false
+        restartDelaySeconds: 6
