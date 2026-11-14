@@ -15,7 +15,13 @@ test('the restart script states are emitted in the safe order', () => {
 test('the restart script carries the requested port and delay', () => {
   const script = buildRestartScript({ port: 4200, delaySeconds: 9 });
   assert.match(script, /Start-Sleep -Seconds 9/u);
-  assert.match(script, /http:\/\/127\.0\.0\.1:4200\//u);
+  assert.match(script, /requestedPort = 4200/u);
+});
+
+test('the restart script follows the port the shell actually advertises', () => {
+  const script = buildRestartScript({});
+  assert.ok(script.includes('ready url='), 'reads the ready line from the shell log');
+  assert.ok(!script.includes("http://127.0.0.1:3179/"), 'does not keep insisting on the requested port');
 });
 
 test('the restart script refuses to run without the shell executable', () => {
@@ -38,4 +44,11 @@ test('the restart script writes to the log path it was given', () => {
 test('the default shell path is the desktop install', () => {
   const script = buildRestartScript({});
   assert.ok(script.includes('C:\\dsh\\desktop\\app\\DshDesktop.exe'));
+});
+
+test('the restart script writes machine-readable evidence', () => {
+  const script = buildRestartScript({ reportPath: 'C:\\state\\last.json' });
+  assert.ok(script.includes("$report = 'C:\\state\\last.json'"), 'uses the report path it was given');
+  assert.ok(script.includes('ConvertTo-Json'), 'emits JSON');
+  assert.ok(script.includes('answered = $answered'), 'records whether the URL answered');
 });

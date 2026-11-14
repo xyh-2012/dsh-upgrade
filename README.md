@@ -39,6 +39,7 @@ plugin_manager  action=install_bundle  target=C:\dsh\plugins\dsh-upgrade
 | `dsh_upgrade_apply` | 下载 → 校验哈希 → npm install → 重钉依赖 → 验证 | 是（`dryRun` 时否） |
 | `dsh_upgrade_verify` | 比对 manifest / 新进程 `--version` / tarball 哈希 | 否 |
 | `dsh_upgrade_restart` | 重启桌面外壳，让新版本加载 | 是 |
+| `dsh_upgrade_status_all` | 一次报多个安装根目录的版本，不扫盘 | 否 |
 
 还有一个人类入口：`/upgrade` 斜杠命令，等价于 apply + restart。
 
@@ -64,7 +65,18 @@ Job Object 里，且 Job 没有设 breakaway 标志 —— 外壳一死，web �
 `dsh_upgrade_restart` 因此用 `Invoke-CimMethod Win32_Process Create` 把重启脚本交给
 `WmiPrvSE.exe` 持有：该进程不在 Job 内，能活到外壳被杀之后，再去重启整个外壳。
 
-顺序也是固定下来的：先停 web 服务 → 再停外壳 → 拉起外壳 → 轮询端口恢复。
+顺序也是固定下来的：先停 web 服务 → 再停外壳 → 拉起外壳 → **读外壳自己报告的地址**
+（`%LOCALAPPDATA%\DshDesktop\shell.log` 的 `ready url=` 行）→ 确认该 URL 应答。
+外壳用 `FindFreePort(3179)` 选端口，所以不能硬等 3179。
+
+结束后把证据写进 `.dsh-upgrade/last-restart.json`：
+
+```json
+{"ok":true,"url":"http://127.0.0.1:3179/","answered":true,"requestedPort":3179,
+ "stoppedWeb":[14108],"stoppedShell":[13584],"startedAt":"...","at":"..."}
+```
+
+下一次会话可以用 `readRestartReport(root)` 或直接读这个文件，核实上次重启到底成没成。
 
 ## 配置
 
@@ -106,7 +118,7 @@ node scripts/selfcheck.mjs --apply            # 真升级
 ## 测试
 
 ```powershell
-npm test     # node --test test/  —— 37 个用例，覆盖版本比较、参数校验、registry 选版、重启脚本
+npm test     # node --test test/  —— 39 个用例，覆盖版本比较、参数校验、registry 选版、重启脚本
 ```
 
 ## License

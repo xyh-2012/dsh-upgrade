@@ -13,7 +13,7 @@ import { defineTool } from './lib/sdk.js';
 import { detectInstallRoot, installedVersion } from './lib/install.js';
 import { PACKAGE_NAME, fetchPackument, pickTargetVersion, resolveRegistry } from './lib/registry.js';
 import { applyUpgrade, probe, readLastRun, verifyInstall } from './lib/upgrade.js';
-import { scheduleRestart } from './lib/restart.js';
+import { readRestartReport, scheduleRestart } from './lib/restart.js';
 
 /** Package name, also used as the bundle id. */
 export const name = 'dsh-upgrade';
@@ -251,21 +251,32 @@ export function apply(ctx, config) {
           scriptPath: { type: 'string', description: 'generated restart script' },
           pid: { type: 'number', description: 'detached process id' },
           detail: { type: 'string', description: 'human-readable outcome' },
+          previousRestart: { type: 'json', description: 'evidence from the last completed restart' },
         },
       },
       render: (_args, value) => text(
         `restart: ${value.ok === true ? 'scheduled' : 'failed'}`,
         value.detail ?? '',
         value.scriptPath !== undefined ? `script: ${value.scriptPath}` : '',
+        ...(value.previousRestart !== undefined && value.previousRestart !== null
+          ? [
+            'previous restart:',
+            `  answered: ${String(value.previousRestart.answered)}`,
+            `  url: ${value.previousRestart.url ?? '(none)'}`,
+            `  at: ${value.previousRestart.at ?? '(unknown)'}`,
+          ]
+          : []),
       ),
     },
     async execute(args, exec) {
       const root = resolveRoot(args.root);
-      return await scheduleRestart(root, {
+      const previousRestart = readRestartReport(root);
+      const launched = await scheduleRestart(root, {
         port: args.port ?? 3179,
         delaySeconds: args.delaySeconds ?? settings.restartDelaySeconds,
         signal: exec?.signal,
       });
+      return { ...launched, previousRestart };
     },
   }));
 

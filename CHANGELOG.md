@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.1
+
+- `dsh_upgrade_restart` 现在等外壳自己报告真实地址：外壳用 `FindFreePort(3179)` 选端口，
+  所以固定轮询 3179 会误判失败；改为从 `%LOCALAPPDATA%\DshDesktop\shell.log` 里读
+  `ready url=` 那一行，再确认该 URL 真的应答。
+- 重启结束后把证据写进 `.dsh-upgrade/last-restart.json`（`ok`/`url`/`answered`/
+  `stoppedWeb`/`stoppedShell`/`at`），供下一次会话核验，新增 `readRestartReport(root)`。
+- 测试从 37 增至 39（新增"跟随外壳广告端口"与"写出机器可读证据"两个用例）。
+
 ## 0.1.0
 
 - 首个版本。
