@@ -41,10 +41,14 @@ test('the restart script follows the port the shell actually advertises', () => 
   const script = buildRestartScript({});
   assert.ok(script.includes('ready url='), 'reads the ready line from the shell log');
   assert.ok(script.includes('$url = $found.Groups[1].Value'), 'takes the URL the shell printed');
-  // Only the no-shell branch may fall back to the requested port: nothing
-  // advertises a URL there, so it is the only thing to wait for.
-  const fixedUrl = script.indexOf("$url = 'http://127.0.0.1:3179/'");
-  assert.ok(fixedUrl > script.indexOf('web server relaunched detached'), 'the fixed port belongs to the no-shell branch only');
+  // The advertised URL always wins. The requested port is only a fallback, and
+  // only when the shell it started is still alive to own that port.
+  assert.ok(
+    script.indexOf('$url = $found.Groups[1].Value') < script.indexOf("$url = 'http://127.0.0.1:3179/'"),
+    'prefers the advertised URL over the requested port',
+  );
+  const fallback = script.slice(script.indexOf("$url = 'http://127.0.0.1:3179/'") - 400);
+  assert.ok(fallback.includes('$shellPid -gt 0'), 'only falls back for a shell that is still running');
 });
 
 test('the restart script only trusts log lines written after the relaunch', () => {
@@ -138,10 +142,21 @@ test('the restart script decides its own mode when asked to', () => {
   assert.ok(script.includes("if ($mode -eq 'shell') {"), 'branches at run time, not at build time');
 });
 
-test('the restart script retries a shell that dies on start', () => {
+test('the restart script waits out a slow shell instead of counting attempts', () => {
+  const script = buildRestartScript({ readyTimeoutSeconds: 120 });
+  assert.ok(script.includes('$readyDeadline = (Get-Date).AddSeconds(120)'), 'polls until a deadline');
+  assert.ok(!script.includes('for ($attempt = 1; $attempt -le 3; $attempt++) {'), 'no fixed attempt count');
+  assert.ok(script.includes('no ready line before the deadline'), 'reports a real timeout');
+});
+
+test('the restart script launches a single-instance shell once at a time', () => {
   const script = buildRestartScript({});
-  assert.ok(script.includes('for ($attempt = 1; $attempt -le 3; $attempt++) {'), 'relaunches up to three times');
-  assert.ok(script.includes('has no ready line yet'), 'reports why it retried');
+  assert.ok(
+    script.includes('$alive = $shellPid -gt 0 -and [bool](Get-Process -Id $shellPid -ErrorAction SilentlyContinue)'),
+    'checks whether the copy it launched is still alive',
+  );
+  assert.ok(script.includes('if (-not $alive -and $launchCount -lt 3) {'), 'relaunches only when nothing runs');
+  assert.ok(script.includes('every launch exited without a ready line'), 'stops after repeated exits');
 });
 
 test('the restart script reports the build that came back', () => {

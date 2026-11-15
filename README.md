@@ -90,6 +90,13 @@ web 服务本身。两种模式都用同一个 `ready url=` 判据核对结果�
 报告的地址**（`%LOCALAPPDATA%\DshDesktop\shell.log` 的 `ready url=` 行）→ 确认该 URL 应答。
 外壳用 `FindFreePort(3179)` 选端口，所以不能硬等 3179。
 
+**等待是「等到截止时间」，不是「试几次」。** 冷启动的外壳要约 16 秒才写出 `ready url=`
+（2026-11-14 实测：19:38:38 拉起、19:38:53 才 ready），早先按「3 次 × 4 秒」计数会在
+第 12 秒就判失败，把成功报成 `ok: false`。现在改成轮询到 `readyTimeoutSeconds`
+（默认 120 秒）为止；并且只有在**自己拉起的那个进程已经退出**时才重新拉起——外壳是单实例的，
+在它还在启动时再拉一次只会得到一个立刻退出的进程。如果外壳进程活着、端口也能应答，
+即使没读到 `ready url=` 也算重启成功：那一行是便利，不是目的。
+
 结束后把证据写进 `.dsh-upgrade/last-restart.json`：
 
 ```json
@@ -150,7 +157,7 @@ node scripts/selfcheck.mjs --apply            # 真升级
 ## 测试
 
 ```powershell
-npm test     # node --test test/  —— 54 个用例，覆盖版本比较、参数校验、registry 选版、重启脚本
+npm test     # node --test test/  —— 55 个用例，覆盖版本比较、参数校验、registry 选版、重启脚本
 ```
 
 ## License

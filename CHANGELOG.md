@@ -1,3 +1,28 @@
+## 0.2.1
+
+A real restart on this machine reported `ok: false` even though it had worked.
+Two defects in the generated script caused it.
+
+- **The ready-line wait gave up after 12 seconds.** The script relaunched the
+  shell up to three times, waiting 4 seconds each. A cold desktop shell needs
+  about 16 seconds before it writes `ready url=` (measured on 2026-11-14:
+  launched 19:38:38, ready 19:38:53), so the script declared failure 3 seconds
+  early while a perfectly healthy shell was still booting. It now polls until a
+  `readyTimeoutSeconds` deadline (default 120) and only reports a timeout when
+  that window really expires.
+- **The empty retry loop started duplicate shells.** Because each attempt
+  launched the shell unconditionally, the shell's single-instance guard made
+  attempts 2 and 3 exit immediately (pids 4620 and 8944 lived under a second),
+  which made the failure look even more certain. The script now checks whether
+  the copy it launched is still alive and relaunches only when it is not, giving
+  up after three launches that all exited.
+- **A missing ready line no longer implies failure.** If the shell it started is
+  still alive and something answers on the requested port, that is accepted as a
+  successful restart. The ready line is a convenience, not the goal.
+
+Verified with a stand-in shell that takes 20 seconds to become ready: the script
+waited, then reported `ok: true, answered: true`, and replaced the stale server.
+55 unit tests pass.
 # Changelog
 
 ## 0.2.0
